@@ -47,6 +47,9 @@ static ngx_conf_post_t  ngx_http_lua_lowat_post =
     { ngx_http_lua_lowat_check };
 
 
+static volatile ngx_cycle_t  *ngx_http_lua_prev_cycle = NULL;
+
+
 static ngx_command_t ngx_http_lua_cmds[] = {
 
     { ngx_string("lua_max_running_timers"),
@@ -345,6 +348,14 @@ static ngx_command_t ngx_http_lua_cmds[] = {
       offsetof(ngx_http_lua_loc_conf_t, check_client_abort),
       NULL },
 
+    { ngx_string("lua_use_default_type"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_HTTP_LIF_CONF
+                        |NGX_CONF_FLAG,
+      ngx_conf_set_flag_slot,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      offsetof(ngx_http_lua_loc_conf_t, use_default_type),
+      NULL },
+
 #if (NGX_HTTP_SSL)
 
     { ngx_string("lua_ssl_verify"),
@@ -407,6 +418,7 @@ ngx_module_t ngx_http_lua_module = {
 static ngx_int_t
 ngx_http_lua_init(ngx_conf_t *cf)
 {
+    int                         multi_http_blocks;
     ngx_int_t                   rc;
     ngx_array_t                *arr;
     ngx_http_handler_pt        *h;
@@ -415,7 +427,15 @@ ngx_http_lua_init(ngx_conf_t *cf)
 
     lmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_lua_module);
 
-    if (lmcf->requires_capture_filter) {
+    if (ngx_http_lua_prev_cycle != ngx_cycle) {
+        ngx_http_lua_prev_cycle = ngx_cycle;
+        multi_http_blocks = 0;
+
+    } else {
+        multi_http_blocks = 1;
+    }
+
+    if (multi_http_blocks || lmcf->requires_capture_filter) {
         rc = ngx_http_lua_capture_filter_init(cf);
         if (rc != NGX_OK) {
             return rc;
@@ -464,14 +484,14 @@ ngx_http_lua_init(ngx_conf_t *cf)
         *h = ngx_http_lua_log_handler;
     }
 
-    if (lmcf->requires_header_filter) {
+    if (multi_http_blocks || lmcf->requires_header_filter) {
         rc = ngx_http_lua_header_filter_init();
         if (rc != NGX_OK) {
             return rc;
         }
     }
 
-    if (lmcf->requires_body_filter) {
+    if (multi_http_blocks || lmcf->requires_body_filter) {
         rc = ngx_http_lua_body_filter_init();
         if (rc != NGX_OK) {
             return rc;
@@ -644,6 +664,7 @@ ngx_http_lua_create_loc_conf(ngx_conf_t *cf)
     conf->enable_code_cache  = NGX_CONF_UNSET;
     conf->http10_buffering   = NGX_CONF_UNSET;
     conf->check_client_abort = NGX_CONF_UNSET;
+    conf->use_default_type   = NGX_CONF_UNSET;
 
     conf->keepalive_timeout = NGX_CONF_UNSET_MSEC;
     conf->connect_timeout = NGX_CONF_UNSET_MSEC;
@@ -657,7 +678,7 @@ ngx_http_lua_create_loc_conf(ngx_conf_t *cf)
     conf->log_socket_errors = NGX_CONF_UNSET;
 
 #if (NGX_HTTP_SSL)
-    
+
     conf->ssl_verify = NGX_CONF_UNSET;
     conf->ssl_verify_depth = NGX_CONF_UNSET_UINT;
     
@@ -713,6 +734,7 @@ ngx_http_lua_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_value(conf->enable_code_cache, prev->enable_code_cache, 1);
     ngx_conf_merge_value(conf->http10_buffering, prev->http10_buffering, 1);
     ngx_conf_merge_value(conf->check_client_abort, prev->check_client_abort, 0);
+    ngx_conf_merge_value(conf->use_default_type, prev->use_default_type, 1);
 
     ngx_conf_merge_msec_value(conf->keepalive_timeout,
                               prev->keepalive_timeout, 60000);

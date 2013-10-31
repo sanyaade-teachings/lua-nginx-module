@@ -30,6 +30,8 @@
 #define MD5_DIGEST_LENGTH 16
 #endif
 
+#define ngx_http_lua_assert(a)  assert(a)
+
 /* Nginx HTTP Lua Inline tag prefix */
 
 #define NGX_HTTP_LUA_INLINE_TAG "nhli_"
@@ -201,7 +203,8 @@ typedef struct {
     ngx_flag_t                       transform_underscores_in_resp_headers;
     ngx_flag_t                       log_socket_errors;
     ngx_flag_t                       check_client_abort;
-    
+    ngx_flag_t                       use_default_type;
+
 #if (NGX_HTTP_SSL)
     ngx_ssl_t                       *ssl;
     ngx_flag_t                       ssl_verify;

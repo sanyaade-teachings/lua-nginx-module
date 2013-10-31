@@ -10,7 +10,7 @@ use t::TestNginxLua;
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() * 3 + 18);
+plan tests => repeat_each() * (blocks() * 3 + 19);
 
 $ENV{TEST_NGINX_MEMCACHED_PORT} ||= 11211;
 
@@ -2385,8 +2385,55 @@ hello world
 --- request
 DELETE /lua
 hello world
+--- stap2
+global c
+probe process("$LIBLUA_PATH").function("rehashtab") {
+    c++
+    //print_ubacktrace()
+    printf("rehash: %d\n", c)
+}
+--- stap_out2
 --- response_body
 hello world
+--- no_error_log
+[error]
+
+
+
+=== TEST 65: DELETE
+--- config
+    location = /t {
+        content_by_lua '
+            res = ngx.location.capture("/sub")
+            ngx.print(res.body)
+        ';
+    }
+    location = /sub {
+        echo hello;
+        echo world;
+    }
+--- request
+GET /t
+--- response_body
+hello
+world
+--- stap
+F(ngx_http_lua_capture_header_filter) {
+    println("capture header filter")
+}
+
+F(ngx_http_lua_capture_body_filter) {
+    println("capture body filter")
+}
+
+--- stap_out
+capture header filter
+capture body filter
+capture body filter
+capture body filter
+capture header filter
+capture body filter
+capture body filter
 --- no_error_log
 [error]
 

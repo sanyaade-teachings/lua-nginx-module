@@ -333,6 +333,7 @@ ngx_http_lua_del_thread(ngx_http_request_t *r, lua_State *L,
     luaL_unref(L, -1, coctx->co_ref);
     coctx->co_ref = LUA_NOREF;
     coctx->co_status = NGX_HTTP_LUA_CO_DEAD;
+    coctx->co = NULL;
 
     lua_pop(L, 1);
 }
@@ -365,6 +366,7 @@ ngx_http_lua_del_all_threads(ngx_http_request_t *r, lua_State *L,
                 ctx->uthreads--;
             }
 
+            cc->co = NULL;
             cc->co_status = NGX_HTTP_LUA_CO_DEAD;
         }
 
@@ -403,6 +405,7 @@ ngx_http_lua_del_all_threads(ngx_http_request_t *r, lua_State *L,
                 luaL_unref(L, -1, ref);
                 cc[i].co_ref = LUA_NOREF;
                 cc[i].co_status = NGX_HTTP_LUA_CO_DEAD;
+                cc[i].co = NULL;
                 ctx->uthreads--;
 
                 if (ctx->uthreads == 0) {
@@ -428,6 +431,7 @@ ngx_http_lua_del_all_threads(ngx_http_request_t *r, lua_State *L,
         luaL_unref(L, -1, entry_coctx->co_ref);
         entry_coctx->co_ref = LUA_NOREF;
         entry_coctx->co_status = NGX_HTTP_LUA_CO_DEAD;
+        entry_coctx->co = NULL;
     }
 
     if (inited) {
@@ -484,7 +488,7 @@ ngx_http_lua_send_header_if_needed(ngx_http_request_t *r,
             r->headers_out.status = NGX_HTTP_OK;
         }
 
-        if (!ctx->headers_set && ngx_http_set_content_type(r) != NGX_OK) {
+        if (!ctx->headers_set && ngx_http_lua_set_content_type(r) != NGX_OK) {
             return NGX_ERROR;
         }
 
@@ -703,31 +707,31 @@ ngx_http_lua_init_registry(ngx_conf_t *cf, lua_State *L)
     /* {{{ register a table to anchor lua coroutines reliably:
      * {([int]ref) = [cort]} */
     lua_pushlightuserdata(L, &ngx_http_lua_coroutines_key);
-    lua_newtable(L);
+    lua_createtable(L, 0, 32 /* nrec */);
     lua_rawset(L, LUA_REGISTRYINDEX);
     /* }}} */
 
     /* create the registry entry for the Lua request ctx data table */
     lua_pushlightuserdata(L, &ngx_http_lua_ctx_tables_key);
-    lua_newtable(L);
+    lua_createtable(L, 0, 32 /* nrec */);
     lua_rawset(L, LUA_REGISTRYINDEX);
 
     /* create the registry entry for the Lua socket connection pool table */
     lua_pushlightuserdata(L, &ngx_http_lua_socket_pool_key);
-    lua_newtable(L);
+    lua_createtable(L, 0, 8 /* nrec */);
     lua_rawset(L, LUA_REGISTRYINDEX);
 
 #if (NGX_PCRE)
     /* create the registry entry for the Lua precompiled regex object cache */
     lua_pushlightuserdata(L, &ngx_http_lua_regex_cache_key);
-    lua_newtable(L);
+    lua_createtable(L, 0, 16 /* nrec */);
     lua_rawset(L, LUA_REGISTRYINDEX);
 #endif
 
     /* {{{ register table to cache user code:
      * { [(string)cache_key] = <code closure> } */
     lua_pushlightuserdata(L, &ngx_http_lua_code_cache_key);
-    lua_newtable(L);
+    lua_createtable(L, 0, 8 /* nrec */);
     lua_rawset(L, LUA_REGISTRYINDEX);
     /* }}} */
 }
@@ -2259,7 +2263,13 @@ ngx_http_lua_handle_exit(lua_State *L, ngx_http_request_t *r,
 
     ngx_http_lua_request_cleanup(ctx, 0);
 
-    if (ctx->buffering && r->headers_out.status) {
+    if (ctx->buffering
+        && r->headers_out.status
+        && ctx->exit_code != NGX_ERROR
+        && ctx->exit_code != NGX_HTTP_REQUEST_TIME_OUT
+        && ctx->exit_code != NGX_HTTP_CLIENT_CLOSED_REQUEST
+        && ctx->exit_code != NGX_HTTP_CLOSE)
+    {
         rc = ngx_http_lua_send_chain_link(r, ctx, NULL /* indicate last_buf */);
 
         if (rc == NGX_ERROR || rc >= NGX_HTTP_SPECIAL_RESPONSE) {
